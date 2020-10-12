@@ -6200,6 +6200,7 @@ void Parser::ParseDecompositionDeclarator(Declarator &D) {
   T.consumeOpen();
 
   SmallVector<DecompositionDeclarator::Binding, 32> Bindings;
+  bool BindingsAreNamed = false;
   while (Tok.isNot(tok::r_square)) {
     if (!Bindings.empty()) {
       if (Tok.is(tok::comma))
@@ -6221,6 +6222,11 @@ void Parser::ParseDecompositionDeclarator(Declarator &D) {
           break;
       }
     }
+
+    bool IsNamedDeclId = Tok.is(tok::period);
+
+    if (IsNamedDeclId)
+      ConsumeToken();
 
     if (Tok.isNot(tok::identifier)) {
       Diag(Tok, diag::err_expected) << tok::identifier;
