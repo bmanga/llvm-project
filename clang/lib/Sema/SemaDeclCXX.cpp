@@ -1352,23 +1352,24 @@ static bool checkMemberDecomposition(Sema &S, ArrayRef<BindingDecl*> Bindings,
   };
 
   if (namedBindings) {
-    unsigned I = 0;
-    for (auto *FD : RD->fields()) {
-      if (FD->isUnnamedBitfield())
-        continue;
-      if (FD->isAnonymousStructOrUnion())
-        continue;
-      auto MatchingBindingIt = std::find_if(
-          Bindings.begin(), Bindings.end(), [FD](const BindingDecl *B) {
-            return B->getBoundFieldName().equals(FD->getName());
-          });
-      if (MatchingBindingIt == Bindings.end()) {
-        continue;
+    for (auto *B : Bindings) {
+      auto DesignatedName = B->getBoundFieldName();
+      FieldDecl *DesignatedField = nullptr;
+      for (auto *FD : RD->fields()) {
+        if (FD->isUnnamedBitfield() || FD->isAnonymousStructOrUnion()) {
+          continue;
+        }
+        if (DesignatedName.equals(FD->getName())) {
+          DesignatedField = FD;
+          break;
+        }
       }
-
-      // TODO: Check all bindings are successfully found.
-
-      BindingDecl *B = *MatchingBindingIt;
+      if (!DesignatedField) {
+        // TODO: Add error when field not found.
+        assert(false);
+      }
+      // TODO: Check that Designated Field has not been bound to
+      // Another binding.
 
       SourceLocation Loc = B->getLocation();
 
@@ -1378,8 +1379,10 @@ static bool checkMemberDecomposition(Sema &S, ArrayRef<BindingDecl*> Bindings,
       // const_cast here.
       S.CheckStructuredBindingMemberAccess(
           Loc, const_cast<CXXRecordDecl *>(OrigRD),
-          DeclAccessPair::make(FD, CXXRecordDecl::MergeAccess(
-                                       BasePair.getAccess(), FD->getAccess())));
+          DeclAccessPair::make(
+              DesignatedField,
+              CXXRecordDecl::MergeAccess(BasePair.getAccess(),
+                                         DesignatedField->getAccess())));
 
       // Initialize the binding to Src.FD.
       ExprResult E = S.BuildDeclRefExpr(Src, DecompType, VK_LValue, Loc);
@@ -1390,9 +1393,9 @@ static bool checkMemberDecomposition(Sema &S, ArrayRef<BindingDecl*> Bindings,
       if (E.isInvalid())
         return true;
       E = S.BuildFieldReferenceExpr(
-          E.get(), /*IsArrow*/ false, Loc, CXXScopeSpec(), FD,
-          DeclAccessPair::make(FD, FD->getAccess()),
-          DeclarationNameInfo(FD->getDeclName(), Loc));
+          E.get(), /*IsArrow*/ false, Loc, CXXScopeSpec(), DesignatedField,
+          DeclAccessPair::make(DesignatedField, DesignatedField->getAccess()),
+          DeclarationNameInfo(DesignatedField->getDeclName(), Loc));
       if (E.isInvalid())
         return true;
 
@@ -1402,9 +1405,10 @@ static bool checkMemberDecomposition(Sema &S, ArrayRef<BindingDecl*> Bindings,
       // FIXME: We resolve a defect here: if the field is mutable, we do not add
       // 'const' to the type of the field.
       Qualifiers Q = DecompType.getQualifiers();
-      if (FD->isMutable())
+      if (DesignatedField->isMutable())
         Q.removeConst();
-      B->setBinding(S.BuildQualifiedType(FD->getType(), Loc, Q), E.get());
+      B->setBinding(S.BuildQualifiedType(DesignatedField->getType(), Loc, Q),
+                    E.get());
     }
     return false;
   }
