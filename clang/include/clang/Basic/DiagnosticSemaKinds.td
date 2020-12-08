@@ -213,6 +213,10 @@ def ext_designated_init_reordered : ExtWarn<
 def note_previous_field_init : Note<
   "previous initialization for field %0 is here">;
 
+// Experimental designated bindings extension
+def err_decomp_decl_repeated_designator : Error<
+  "%0 designator used multiple times in the same structured binding declaration">;
+
 // Declarations.
 def ext_plain_complex : ExtWarn<
   "plain '_Complex' requires a type specifier; assuming '_Complex double'">;

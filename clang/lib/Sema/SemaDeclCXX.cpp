@@ -1351,10 +1351,21 @@ static bool checkMemberDecomposition(Sema &S, ArrayRef<BindingDecl*> Bindings,
     return true;
   };
 
+  SmallVector<FieldDecl *, 8> BindingsToFieldsMap;
   if (namedBindings) {
+    llvm::StringMap<BindingDecl *> NameToBindingMap;
     for (auto *B : Bindings) {
       auto DesignatedName = B->getBoundFieldName();
+      SourceLocation Loc = B->getLocation();
       FieldDecl *DesignatedField = nullptr;
+
+      auto ItSuccessPair =
+          NameToBindingMap.insert(std::make_pair(DesignatedName, B));
+      if (!ItSuccessPair.second) {
+        S.Diag(Loc, diag::err_decomp_decl_repeated_designator)
+            << DesignatedName;
+        return true;
+      }
       for (auto *FD : RD->fields()) {
         if (FD->isUnnamedBitfield() || FD->isAnonymousStructOrUnion()) {
           continue;
@@ -1364,75 +1375,42 @@ static bool checkMemberDecomposition(Sema &S, ArrayRef<BindingDecl*> Bindings,
           break;
         }
       }
-      SourceLocation Loc = B->getLocation();
-
       if (!DesignatedField) {
-        S.Diag(Loc, diag::err_field_designator_unknown) << DesignatedName << S.Context.getRecordType(RD);
-        continue;
+        S.Diag(Loc, diag::err_field_designator_unknown)
+            << DesignatedName << S.Context.getRecordType(RD);
+        return true;
       }
-      // TODO: Check that Designated Field has not been bound to
-      // Another binding.
-
-
-      // The field must be accessible in the context of the structured binding.
-      // We already checked that the base class is accessible.
-      // FIXME: Add 'const' to AccessedEntity's classes so we can remove the
-      // const_cast here.
-      S.CheckStructuredBindingMemberAccess(
-          Loc, const_cast<CXXRecordDecl *>(OrigRD),
-          DeclAccessPair::make(
-              DesignatedField,
-              CXXRecordDecl::MergeAccess(BasePair.getAccess(),
-                                         DesignatedField->getAccess())));
-
-      // Initialize the binding to Src.FD.
-      ExprResult E = S.BuildDeclRefExpr(Src, DecompType, VK_LValue, Loc);
-      if (E.isInvalid())
-        return true;
-      E = S.ImpCastExprToType(E.get(), BaseType, CK_UncheckedDerivedToBase,
-                              VK_LValue, &BasePath);
-      if (E.isInvalid())
-        return true;
-      E = S.BuildFieldReferenceExpr(
-          E.get(), /*IsArrow*/ false, Loc, CXXScopeSpec(), DesignatedField,
-          DeclAccessPair::make(DesignatedField, DesignatedField->getAccess()),
-          DeclarationNameInfo(DesignatedField->getDeclName(), Loc));
-      if (E.isInvalid())
-        return true;
-
-      // If the type of the member is T, the referenced type is cv T, where cv
-      // is the cv-qualification of the decomposition expression.
-      //
-      // FIXME: We resolve a defect here: if the field is mutable, we do not add
-      // 'const' to the type of the field.
-      Qualifiers Q = DecompType.getQualifiers();
-      if (DesignatedField->isMutable())
-        Q.removeConst();
-      B->setBinding(S.BuildQualifiedType(DesignatedField->getType(), Loc, Q),
-                    E.get());
+      BindingsToFieldsMap.push_back(DesignatedField);
     }
-    return false;
+  } else {
+    //   all of E's non-static data members shall be [...] well-formed
+    //   when named as e.name in the context of the structured binding,
+    //   E shall not have an anonymous union member, ...
+    unsigned I = 0;
+    for (auto *FD : RD->fields()) {
+      if (FD->isUnnamedBitfield())
+        continue;
+
+      if (FD->isAnonymousStructOrUnion()) {
+        S.Diag(Src->getLocation(), diag::err_decomp_decl_anon_union_member)
+            << DecompType << FD->getType()->isUnionType();
+        S.Diag(FD->getLocation(), diag::note_declared_at);
+        return true;
+      }
+
+      // We have a real field to bind.
+      if (I++ >= Bindings.size())
+        return DiagnoseBadNumberOfBindings();
+
+      BindingsToFieldsMap.push_back(FD);
+    }
+    if (I != Bindings.size())
+      return DiagnoseBadNumberOfBindings();
   }
 
-  //   all of E's non-static data members shall be [...] well-formed
-  //   when named as e.name in the context of the structured binding,
-  //   E shall not have an anonymous union member, ...
   unsigned I = 0;
-  for (auto *FD : RD->fields()) {
-    if (FD->isUnnamedBitfield())
-      continue;
-
-    if (FD->isAnonymousStructOrUnion()) {
-      S.Diag(Src->getLocation(), diag::err_decomp_decl_anon_union_member)
-        << DecompType << FD->getType()->isUnionType();
-      S.Diag(FD->getLocation(), diag::note_declared_at);
-      return true;
-    }
-
-    // We have a real field to bind.
-    if (I >= Bindings.size())
-      return DiagnoseBadNumberOfBindings();
-    auto *B = Bindings[I++];
+  for (auto *B : Bindings) {
+    auto *FD = BindingsToFieldsMap[I++];
     SourceLocation Loc = B->getLocation();
 
     // The field must be accessible in the context of the structured binding.
@@ -1469,9 +1447,6 @@ static bool checkMemberDecomposition(Sema &S, ArrayRef<BindingDecl*> Bindings,
       Q.removeConst();
     B->setBinding(S.BuildQualifiedType(FD->getType(), Loc, Q), E.get());
   }
-
-  if (I != Bindings.size())
-    return DiagnoseBadNumberOfBindings();
 
   return false;
 }
