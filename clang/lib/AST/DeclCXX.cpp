@@ -3072,8 +3072,9 @@ StaticAssertDecl *StaticAssertDecl::CreateDeserialized(ASTContext &C,
 void BindingDecl::anchor() {}
 
 BindingDecl *BindingDecl::Create(ASTContext &C, DeclContext *DC,
-                                 SourceLocation IdLoc, IdentifierInfo *Id) {
-  return new (C, DC) BindingDecl(DC, IdLoc, Id);
+                                 SourceLocation IdLoc, IdentifierInfo *Id,
+                                 IdentifierInfo *Field) {
+  return new (C, DC) BindingDecl(DC, IdLoc, Id, Field);
 }
 
 BindingDecl *BindingDecl::CreateDeserialized(ASTContext &C, unsigned ID) {

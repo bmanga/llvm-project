@@ -6190,19 +6190,22 @@ void Parser::ParseDecompositionDeclarator(Declarator &D) {
   // array declarator.
   // FIXME: Consume the l_square first so we don't need extra lookahead for
   // this.
+  /*
   if (!(NextToken().is(tok::identifier) &&
         GetLookAheadToken(2).isOneOf(tok::comma, tok::r_square)) &&
       !(NextToken().is(tok::r_square) &&
         GetLookAheadToken(2).isOneOf(tok::equal, tok::l_brace)))
     return ParseMisplacedBracketDeclarator(D);
+    */
 
   BalancedDelimiterTracker T(*this, tok::l_square);
   T.consumeOpen();
 
   SmallVector<DecompositionDeclarator::Binding, 32> Bindings;
-  bool BindingsAreNamed = false;
+  SmallVector<DecompositionDeclarator::Binding, 32> NamedBindings;
+
   while (Tok.isNot(tok::r_square)) {
-    if (!Bindings.empty()) {
+    if (!(Bindings.empty() && NamedBindings.empty())) {
       if (Tok.is(tok::comma))
         ConsumeToken();
       else {
@@ -6222,19 +6225,44 @@ void Parser::ParseDecompositionDeclarator(Declarator &D) {
           break;
       }
     }
+    IdentifierInfo *BindingName = nullptr;
+    IdentifierInfo *BindingField = nullptr;
 
     bool IsNamedDeclId = Tok.is(tok::period);
 
-    if (IsNamedDeclId)
+    if (IsNamedDeclId) {
       ConsumeToken();
+    }
 
     if (Tok.isNot(tok::identifier)) {
       Diag(Tok, diag::err_expected) << tok::identifier;
       break;
     }
 
-    Bindings.push_back({Tok.getIdentifierInfo(), Tok.getLocation()});
+    BindingName = Tok.getIdentifierInfo();
     ConsumeToken();
+
+    if (IsNamedDeclId) {
+      BindingField = BindingName;
+    } else if (Tok.is(tok::equal)) {
+      // This could be a renamed binding.
+      // TODO: Add error checking.
+      ConsumeToken();
+      if (Tok.is(tok::period)) {
+        ConsumeToken();
+        if (Tok.is(tok::identifier)) {
+          IsNamedDeclId = true;
+          BindingField = Tok.getIdentifierInfo();
+          ConsumeToken();
+        }
+      }
+    }
+
+    if (IsNamedDeclId) {
+      NamedBindings.push_back({BindingName, BindingField, Tok.getLocation()});
+    } else {
+      Bindings.push_back({BindingName, nullptr, Tok.getLocation()});
+    }
   }
 
   if (Tok.isNot(tok::r_square))
@@ -6249,7 +6277,19 @@ void Parser::ParseDecompositionDeclarator(Declarator &D) {
     T.consumeClose();
   }
 
-  return D.setDecompositionBindings(T.getOpenLocation(), Bindings,
+  bool NoBindings = Bindings.empty();
+  bool NoNamedBindings = NamedBindings.empty();
+
+  if (!(NoBindings ^ NoNamedBindings)) {
+    // TODO: There are both named and non-named bindings. Issue an error.
+    assert(false);
+  }
+
+  if (NoNamedBindings)
+    return D.setDecompositionBindings(T.getOpenLocation(), Bindings,
+                                      T.getCloseLocation());
+
+  return D.setDecompositionBindings(T.getOpenLocation(), NamedBindings,
                                     T.getCloseLocation());
 }
 

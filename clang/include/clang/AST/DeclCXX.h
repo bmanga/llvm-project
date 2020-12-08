@@ -3815,8 +3815,14 @@ class BindingDecl : public ValueDecl {
   /// binding).
   Expr *Binding = nullptr;
 
-  BindingDecl(DeclContext *DC, SourceLocation IdLoc, IdentifierInfo *Id)
-      : ValueDecl(Decl::Binding, DC, IdLoc, Id, QualType()) {}
+  /// The name of the record field this binding should be associated with
+  /// (if a named binding).
+  IdentifierInfo *RecordField;
+
+  BindingDecl(DeclContext *DC, SourceLocation IdLoc, IdentifierInfo *Id,
+              IdentifierInfo *Field = nullptr)
+      : ValueDecl(Decl::Binding, DC, IdLoc, Id, QualType()),
+        RecordField(Field) {}
 
   void anchor() override;
 
@@ -3824,13 +3830,21 @@ public:
   friend class ASTDeclReader;
 
   static BindingDecl *Create(ASTContext &C, DeclContext *DC,
-                             SourceLocation IdLoc, IdentifierInfo *Id);
+                             SourceLocation IdLoc, IdentifierInfo *Id,
+                             IdentifierInfo *Field = nullptr);
   static BindingDecl *CreateDeserialized(ASTContext &C, unsigned ID);
 
   /// Get the expression to which this declaration is bound. This may be null
   /// in two different cases: while parsing the initializer for the
   /// decomposition declaration, and when the initializer is type-dependent.
   Expr *getBinding() const { return Binding; }
+
+  bool isNamed() const { return RecordField != nullptr; }
+
+  StringRef getBoundFieldName() const {
+    assert(isNamed());
+    return RecordField->getName();
+  }
 
   /// Get the decomposition declaration that this binding represents a
   /// decomposition of.
@@ -3868,6 +3882,7 @@ class DecompositionDecl final
       private llvm::TrailingObjects<DecompositionDecl, BindingDecl *> {
   /// The number of BindingDecl*s following this object.
   unsigned NumBindings;
+  bool IsNamedDecomposition = false;
 
   DecompositionDecl(ASTContext &C, DeclContext *DC, SourceLocation StartLoc,
                     SourceLocation LSquareLoc, QualType T,
@@ -3880,6 +3895,7 @@ class DecompositionDecl final
                             getTrailingObjects<BindingDecl *>());
     for (auto *B : Bindings)
       B->setDecomposedDecl(this);
+    IsNamedDecomposition = Bindings[0]->isNamed();
   }
 
   void anchor() override;
@@ -3900,6 +3916,8 @@ public:
   ArrayRef<BindingDecl *> bindings() const {
     return llvm::makeArrayRef(getTrailingObjects<BindingDecl *>(), NumBindings);
   }
+
+  bool isNamedDecomposition() const { return IsNamedDecomposition; }
 
   void printName(raw_ostream &os) const override;
 

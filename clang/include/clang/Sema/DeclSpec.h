@@ -1702,6 +1702,7 @@ class DecompositionDeclarator {
 public:
   struct Binding {
     IdentifierInfo *Name;
+    IdentifierInfo *Field; // In case of named binding.
     SourceLocation NameLoc;
   };
 

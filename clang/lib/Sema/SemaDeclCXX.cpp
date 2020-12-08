@@ -841,7 +841,7 @@ Sema::ActOnDecompositionDeclarator(Scope *S, Declarator &D,
       Diag(Old->getLocation(), diag::note_previous_definition);
     }
 
-    auto *BD = BindingDecl::Create(Context, DC, B.NameLoc, B.Name);
+    auto *BD = BindingDecl::Create(Context, DC, B.NameLoc, B.Name, B.Field);
     PushOnScopeChains(BD, S, true);
     Bindings.push_back(BD);
     ParsingInitForAutoVars.insert(BD);
@@ -1325,7 +1325,8 @@ static DeclAccessPair findDecomposableBaseClass(Sema &S, SourceLocation Loc,
 
 static bool checkMemberDecomposition(Sema &S, ArrayRef<BindingDecl*> Bindings,
                                      ValueDecl *Src, QualType DecompType,
-                                     const CXXRecordDecl *OrigRD) {
+                                     const CXXRecordDecl *OrigRD,
+                                     bool namedBindings) {
   if (S.RequireCompleteType(Src->getLocation(), DecompType,
                             diag::err_incomplete_type))
     return true;
@@ -1349,6 +1350,64 @@ static bool checkMemberDecomposition(Sema &S, ArrayRef<BindingDecl*> Bindings,
         << (NumFields < Bindings.size());
     return true;
   };
+
+  if (namedBindings) {
+    unsigned I = 0;
+    for (auto *FD : RD->fields()) {
+      if (FD->isUnnamedBitfield())
+        continue;
+      if (FD->isAnonymousStructOrUnion())
+        continue;
+      auto MatchingBindingIt = std::find_if(
+          Bindings.begin(), Bindings.end(), [FD](const BindingDecl *B) {
+            return B->getBoundFieldName().equals(FD->getName());
+          });
+      if (MatchingBindingIt == Bindings.end()) {
+        continue;
+      }
+
+      // TODO: Check all bindings are successfully found.
+
+      BindingDecl *B = *MatchingBindingIt;
+
+      SourceLocation Loc = B->getLocation();
+
+      // The field must be accessible in the context of the structured binding.
+      // We already checked that the base class is accessible.
+      // FIXME: Add 'const' to AccessedEntity's classes so we can remove the
+      // const_cast here.
+      S.CheckStructuredBindingMemberAccess(
+          Loc, const_cast<CXXRecordDecl *>(OrigRD),
+          DeclAccessPair::make(FD, CXXRecordDecl::MergeAccess(
+                                       BasePair.getAccess(), FD->getAccess())));
+
+      // Initialize the binding to Src.FD.
+      ExprResult E = S.BuildDeclRefExpr(Src, DecompType, VK_LValue, Loc);
+      if (E.isInvalid())
+        return true;
+      E = S.ImpCastExprToType(E.get(), BaseType, CK_UncheckedDerivedToBase,
+                              VK_LValue, &BasePath);
+      if (E.isInvalid())
+        return true;
+      E = S.BuildFieldReferenceExpr(
+          E.get(), /*IsArrow*/ false, Loc, CXXScopeSpec(), FD,
+          DeclAccessPair::make(FD, FD->getAccess()),
+          DeclarationNameInfo(FD->getDeclName(), Loc));
+      if (E.isInvalid())
+        return true;
+
+      // If the type of the member is T, the referenced type is cv T, where cv
+      // is the cv-qualification of the decomposition expression.
+      //
+      // FIXME: We resolve a defect here: if the field is mutable, we do not add
+      // 'const' to the type of the field.
+      Qualifiers Q = DecompType.getQualifiers();
+      if (FD->isMutable())
+        Q.removeConst();
+      B->setBinding(S.BuildQualifiedType(FD->getType(), Loc, Q), E.get());
+    }
+    return false;
+  }
 
   //   all of E's non-static data members shall be [...] well-formed
   //   when named as e.name in the context of the structured binding,
@@ -1477,7 +1536,8 @@ void Sema::CheckCompleteDecompositionDeclaration(DecompositionDecl *DD) {
   // C++1z [dcl.decomp]/4:
   //   all of E's non-static data members shall be [...] direct members of
   //   E or of the same unambiguous public base class of E, ...
-  if (checkMemberDecomposition(*this, Bindings, DD, DecompType, RD))
+  if (checkMemberDecomposition(*this, Bindings, DD, DecompType, RD,
+                               DD->isNamedDecomposition()))
     DD->setInvalidDecl();
 }
 
