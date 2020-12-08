@@ -6202,10 +6202,11 @@ void Parser::ParseDecompositionDeclarator(Declarator &D) {
   T.consumeOpen();
 
   SmallVector<DecompositionDeclarator::Binding, 32> Bindings;
-  SmallVector<DecompositionDeclarator::Binding, 32> NamedBindings;
+
+  bool DesignatedBindings = false;
 
   while (Tok.isNot(tok::r_square)) {
-    if (!(Bindings.empty() && NamedBindings.empty())) {
+    if (!Bindings.empty()) {
       if (Tok.is(tok::comma))
         ConsumeToken();
       else {
@@ -6228,9 +6229,9 @@ void Parser::ParseDecompositionDeclarator(Declarator &D) {
     IdentifierInfo *BindingName = nullptr;
     IdentifierInfo *BindingField = nullptr;
 
-    bool IsNamedDeclId = Tok.is(tok::period);
+    bool IsDesignatedDeclId = Tok.is(tok::period);
 
-    if (IsNamedDeclId) {
+    if (IsDesignatedDeclId) {
       ConsumeToken();
     }
 
@@ -6242,27 +6243,28 @@ void Parser::ParseDecompositionDeclarator(Declarator &D) {
     BindingName = Tok.getIdentifierInfo();
     ConsumeToken();
 
-    if (IsNamedDeclId) {
+    if (IsDesignatedDeclId) {
       BindingField = BindingName;
     } else if (Tok.is(tok::equal)) {
-      // This could be a renamed binding.
+      // This could be a renamed designated binding.
       // TODO: Add error checking.
       ConsumeToken();
       if (Tok.is(tok::period)) {
         ConsumeToken();
         if (Tok.is(tok::identifier)) {
-          IsNamedDeclId = true;
+          IsDesignatedDeclId = true;
           BindingField = Tok.getIdentifierInfo();
           ConsumeToken();
         }
       }
     }
 
-    if (IsNamedDeclId) {
-      NamedBindings.push_back({BindingName, BindingField, Tok.getLocation()});
-    } else {
-      Bindings.push_back({BindingName, nullptr, Tok.getLocation()});
+    if (!Bindings.empty() && (IsDesignatedDeclId ^ DesignatedBindings)) {
+      Diag(Tok, diag::err_mixed_bindings);
+      break;
     }
+    DesignatedBindings = IsDesignatedDeclId;
+    Bindings.push_back({BindingName, BindingField, Tok.getLocation()});
   }
 
   if (Tok.isNot(tok::r_square))
@@ -6277,20 +6279,8 @@ void Parser::ParseDecompositionDeclarator(Declarator &D) {
     T.consumeClose();
   }
 
-  bool NoBindings = Bindings.empty();
-  bool NoNamedBindings = NamedBindings.empty();
-
-  if (!(NoBindings ^ NoNamedBindings)) {
-    // TODO: There are both named and non-named bindings. Issue an error.
-    assert(false);
-  }
-
-  if (NoNamedBindings)
-    return D.setDecompositionBindings(T.getOpenLocation(), Bindings,
+  return D.setDecompositionBindings(T.getOpenLocation(), Bindings,
                                       T.getCloseLocation());
-
-  return D.setDecompositionBindings(T.getOpenLocation(), NamedBindings,
-                                    T.getCloseLocation());
 }
 
 /// ParseParenDeclarator - We parsed the declarator D up to a paren.  This is

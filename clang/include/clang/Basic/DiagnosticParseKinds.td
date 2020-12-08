@@ -940,6 +940,11 @@ def warn_cxx17_compat_lambda_template_parameter_list: Warning<
 def err_lambda_template_parameter_list_empty : Error<
   "lambda template parameter list cannot be empty">;
 
+ // Experimental designated bindings
+ def err_mixed_bindings : Error<
+  "mixing designated and non-designated names in strucured binding declaration "
+  "is not allowed">;
+
 // Availability attribute
 def err_expected_version : Error<
   "expected a version of the form 'major[.minor[.subminor]]'">;
