@@ -1364,14 +1364,15 @@ static bool checkMemberDecomposition(Sema &S, ArrayRef<BindingDecl*> Bindings,
           break;
         }
       }
+      SourceLocation Loc = B->getLocation();
+
       if (!DesignatedField) {
-        // TODO: Add error when field not found.
-        assert(false);
+        S.Diag(Loc, diag::err_field_designator_unknown) << DesignatedName << S.Context.getRecordType(RD);
+        continue;
       }
       // TODO: Check that Designated Field has not been bound to
       // Another binding.
 
-      SourceLocation Loc = B->getLocation();
 
       // The field must be accessible in the context of the structured binding.
       // We already checked that the base class is accessible.
